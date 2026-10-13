@@ -142,21 +142,28 @@ async function isValidPaymentType(paymentTypeId) {
 }
 
 /**
- * Valida se salesmanId existe em TB_COLABORADOR (cadastro de vendedores — GET /salesmen).
+ * Situação do vendedor em TB_COLABORADOR (cadastro de GET /salesmen).
+ * Ativo = sem data de demissão, mesmo critério do filtro GET /salesmen?active=true.
  * @param {number} salesmanId
- * @returns {Promise<boolean>}
+ * @returns {Promise<{exists: boolean, dismissedAt: Date|null}>}
  */
-async function isValidSalesman(salesmanId) {
+async function findSalesmanStatus(salesmanId) {
   try {
     const rows = await query(
-      'SELECT CLB_CODIGO FROM TB_COLABORADOR WHERE CLB_CODIGO = ?',
+      'SELECT CLB_DEMISSAO FROM TB_COLABORADOR WHERE CLB_CODIGO = ?',
       [Number(salesmanId)]
     );
-    return rows.length > 0;
+    if (!rows.length) return { exists: false, dismissedAt: null };
+    return { exists: true, dismissedAt: rows[0].CLB_DEMISSAO ?? null };
   } catch (err) {
     console.error('[VALIDATOR] Erro ao validar salesmanId:', err.message);
-    return false;
+    return { exists: false, dismissedAt: null };
   }
+}
+
+function formatDateBR(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,7 +389,7 @@ async function validateOrderPayload(payload) {
     checkNumber(`order.${field}`, label, order[field], integer);
   }
 
-  // --- Vendedor: obrigatório, maior que zero e cadastrado ---
+  // --- Vendedor: obrigatório, maior que zero, cadastrado e ativo (sem demissão) ---
   const { salesmanId } = order;
   if (!isPresent(salesmanId) || salesmanId === '') {
     addError('order.salesmanId', 'Informe o código do vendedor (retornado no login).');
@@ -392,8 +399,18 @@ async function validateOrderPayload(payload) {
       'Código de vendedor inválido: informe o código do vendedor (retornado no login). O valor 0 não é aceito.',
       salesmanId
     );
-  } else if (!(await isValidSalesman(salesmanId))) {
-    addError('order.salesmanId', 'Vendedor não encontrado. Use um código retornado por GET /salesmen.', salesmanId);
+  } else {
+    const salesman = await findSalesmanStatus(salesmanId);
+    if (!salesman.exists) {
+      addError('order.salesmanId', 'Vendedor não encontrado. Use um código retornado por GET /salesmen?active=true.', salesmanId);
+    } else if (salesman.dismissedAt) {
+      const since = salesman.dismissedAt instanceof Date ? ` em ${formatDateBR(salesman.dismissedAt)}` : '';
+      addError(
+        'order.salesmanId',
+        `Vendedor demitido${since} não pode receber pedidos. Use um vendedor ativo (GET /salesmen?active=true).`,
+        salesmanId
+      );
+    }
   }
 
   // --- Validação de institutionId (apenas se informado) ---
@@ -455,6 +472,6 @@ module.exports = {
   isValidFiscalDocument,
   isValidInstitution,
   isValidPaymentType,
-  isValidSalesman,
+  findSalesmanStatus,
   validateOrderPayload,
 };

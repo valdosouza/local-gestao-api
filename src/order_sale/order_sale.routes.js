@@ -302,7 +302,7 @@ router.post('/', orderSaleCtrl.createOrder);
  *             zipcode:            { type: string, description: "8 dígitos, com ou sem máscara (gravado só com dígitos)", example: "81770090" }
  *             cityName:           { type: string, maxLength: 60, example: "Curitiba" }
  *             stateAbbreviation:  { type: string, minLength: 2, maxLength: 2, example: "PR" }
- *             salesmanId:         { type: integer, minimum: 1, description: "Código do vendedor (retornado no login). Obrigatório; precisa existir em GET /salesmen (0 não é aceito)", example: 7 }
+ *             salesmanId:         { type: integer, minimum: 1, description: "Código do vendedor (retornado no login). Obrigatório; precisa ser um vendedor ativo, sem demissão (GET /salesmen?active=true). 0 não é aceito", example: 7 }
  *             paymentTypeId:      { type: integer, example: 1, nullable: true }
  *             quantityProducts:   { type: number, example: 2 }
  *             totalProducts:      { type: number, example: 700 }
