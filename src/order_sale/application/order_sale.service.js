@@ -166,7 +166,7 @@ async function createOrder(payload) {
       customerName:      order.customerName,
       fiscalDocument:    order.fiscalDocument,
       email:             order.email,
-      birthFoundation:   order.birthFoundation,
+      birthFoundation:   parseDate(order.birthFoundation),
       salesmanId:        order.salesmanId,
     });
 

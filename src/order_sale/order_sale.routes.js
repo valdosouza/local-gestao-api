@@ -184,7 +184,26 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  *                   items:
  *                     $ref: '#/components/schemas/OrderSaleItem'
  *       400:
- *         description: Dados inválidos, pedido faturado ou campo obrigatório ausente
+ *         description: |
+ *           Dados inválidos, pedido faturado ou campo obrigatório ausente.
+ *           Em erros de validação, `fields` lista cada campo com problema (caminho no JSON),
+ *           o motivo/como corrigir e o valor recebido; `details` traz as mesmas mensagens em texto.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ValidationError'
+ *             example:
+ *               error: "Pedido não gravado: corrija os campos indicados e envie novamente."
+ *               details:
+ *                 - "order.complement: Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
+ *                 - "order.zipcode: CEP deve ter 8 dígitos; foram informados 7. Ex.: 81770090 ou 81770-090."
+ *               fields:
+ *                 - field: "order.complement"
+ *                   message: "Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
+ *                   received: "APARTAMENTO 1203 BLOCO B TORRE 2"
+ *                 - field: "order.zipcode"
+ *                   message: "CEP deve ter 8 dígitos; foram informados 7. Ex.: 81770090 ou 81770-090."
+ *                   received: "8177-009"
  */
 router.post('/', orderSaleCtrl.createOrder);
 
@@ -268,21 +287,21 @@ router.post('/', orderSaleCtrl.createOrder);
  *             Campos preenchidos internamente pela API (NÃO enviar):
  *             type, invoiced, presenceIndicator, terminal, approved, deliveryAddressId
  *           properties:
- *             id:                 { type: string, description: "Código externo do pedido (referência do sistema de terceiro). Usado para controlar duplicidade via TB_PEDIDO_FROM_EXTERIOR.", example: "MG-50001" }
+ *             id:                 { type: string, maxLength: 50, description: "Código externo do pedido (referência do sistema de terceiro). Usado para controlar duplicidade via TB_PEDIDO_FROM_EXTERIOR.", example: "MG-50001" }
  *             userId:             { type: integer, description: "Código do usuário (retornado no login)", example: 3 }
  *             date:               { type: string, example: "2024-06-15", description: "Formato YYYY-MM-DD ou DD/MM/YYYY" }
- *             hour:               { type: string, example: "08:00", nullable: true }
- *             customerName:       { type: string, example: "João da Silva" }
+ *             hour:               { type: string, example: "08:00", description: "Formato HH:MM ou HH:MM:SS", nullable: true }
+ *             customerName:       { type: string, maxLength: 100, example: "João da Silva" }
  *             fiscalDocument:     { type: string, description: "CPF ou CNPJ (com ou sem máscara)", example: "123.456.789-00" }
- *             email:              { type: string, example: "joao@email.com", nullable: true }
- *             birthFoundation:    { type: string, format: date, example: "1977-10-09", description: "Data de nascimento (PF) ou fundação (PJ)", nullable: true }
- *             street:             { type: string, example: "Rua Tal" }
- *             buildingNumber:     { type: string, example: "28" }
- *             complement:         { type: string, example: "Casa A", nullable: true }
- *             neighborhood:       { type: string, example: "Centro" }
- *             zipcode:            { type: string, example: "81770090" }
- *             cityName:           { type: string, example: "Curitiba" }
- *             stateAbbreviation:  { type: string, example: "PR" }
+ *             email:              { type: string, maxLength: 100, example: "joao@email.com", nullable: true }
+ *             birthFoundation:    { type: string, format: date, example: "1977-10-09", description: "Data de nascimento (PF) ou fundação (PJ). Formato YYYY-MM-DD ou DD/MM/YYYY", nullable: true }
+ *             street:             { type: string, maxLength: 100, example: "Rua Tal" }
+ *             buildingNumber:     { type: string, maxLength: 10, example: "28" }
+ *             complement:         { type: string, maxLength: 25, example: "Casa A", nullable: true }
+ *             neighborhood:       { type: string, maxLength: 100, example: "Centro" }
+ *             zipcode:            { type: string, description: "8 dígitos, com ou sem máscara (gravado só com dígitos)", example: "81770090" }
+ *             cityName:           { type: string, maxLength: 60, example: "Curitiba" }
+ *             stateAbbreviation:  { type: string, minLength: 2, maxLength: 2, example: "PR" }
  *             salesmanId:         { type: integer, description: "Código do vendedor (retornado no login)", example: 7, nullable: true }
  *             paymentTypeId:      { type: integer, example: 1, nullable: true }
  *             quantityProducts:   { type: number, example: 2 }
@@ -310,6 +329,24 @@ router.post('/', orderSaleCtrl.createOrder);
  *               discountPct: { type: number, default: 0 }
  *               stockListId: { type: integer, example: 1, nullable: true }
  *               priceListId: { type: integer, example: 1, nullable: true }
+ *
+ *     ValidationError:
+ *       type: object
+ *       properties:
+ *         error:   { type: string, description: "Resumo do problema" }
+ *         details:
+ *           type: array
+ *           description: "Mensagens prontas para exibir, no formato 'campo: mensagem'"
+ *           items: { type: string }
+ *         fields:
+ *           type: array
+ *           description: "Um registro por campo com problema — use `field` para destacar o campo na tela"
+ *           items:
+ *             type: object
+ *             properties:
+ *               field:    { type: string, description: "Caminho do campo no JSON enviado", example: "items[0].quantity" }
+ *               message:  { type: string, description: "O que está errado e como corrigir" }
+ *               received: { description: "Valor recebido (omitido quando o campo não foi enviado)" }
  *
  *     OrderSaleUpdateInput:
  *       type: object

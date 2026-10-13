@@ -54,8 +54,9 @@ async function createOrder(req, res, next) {
     const validation = await validateOrderPayload(req.body);
     if (!validation.valid) {
       return res.status(400).json({
-        error: 'Validação do payload falhou',
-        details: validation.errors,
+        error:   'Pedido não gravado: corrija os campos indicados e envie novamente.',
+        details: validation.errors.map((e) => `${e.field}: ${e.message}`),
+        fields:  validation.errors,
       });
     }
 

@@ -430,8 +430,10 @@ class OrderSaleRepository {
     const genRows = await query('SELECT GEN_ID(GN_ENDERECO, 1) AS NEW_ID FROM RDB$DATABASE');
     const newId = genRows[0].NEW_ID;
     const doc = (data.fiscalDocument || '').replace(/[.\-/]/g, '');
+    // END_CEP é VARCHAR(8): grava só os dígitos ("81770-090" -> "81770090")
+    const cep = String(data.zipcode ?? '').replace(/\D/g, '');
 
-    const siglaUf = (data.stateAbbreviation || '').toUpperCase();
+    const siglaUf = String(data.stateAbbreviation ?? '').trim().toUpperCase();
 
     let codigoEstado = null;
     if (siglaUf) {
@@ -473,7 +475,7 @@ class OrderSaleRepository {
         data.buildingNumber || '',
         (data.complement || '').toUpperCase(),
         (data.neighborhood || '').toUpperCase(),
-        data.zipcode || '',
+        cep,
         codigoEstado,
         codigoCidade,
       ]);
