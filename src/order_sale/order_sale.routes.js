@@ -323,7 +323,7 @@ router.post('/', orderSaleCtrl.createOrder);
  *             properties:
  *               productId:   { type: integer, example: 200 }
  *               sequence:    { type: integer, example: 1, nullable: true }
- *               quantity:    { type: number, example: 2 }
+ *               quantity:    { type: number, minimum: 0, exclusiveMinimum: true, description: "Maior que zero", example: 2 }
  *               unitPrice:   { type: number, example: 350 }
  *               discount:    { type: number, default: 0 }
  *               discountPct: { type: number, default: 0 }

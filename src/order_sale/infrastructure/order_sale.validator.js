@@ -242,14 +242,17 @@ async function validateOrderPayload(payload) {
     errors.push({ field, message, ...(received !== undefined && { received }) });
   };
 
-  // --- Validações de estrutura ---
-  if (!payload || !payload.order || typeof payload.order !== 'object') {
-    addError('order', 'Envie os dados do pedido no objeto "order".');
-    return { valid: false, errors };
-  }
+  const hasOrder = Boolean(payload && payload.order && typeof payload.order === 'object');
+  const items    = payload && Array.isArray(payload.items) ? payload.items : [];
 
-  if (!Array.isArray(payload.items) || payload.items.length === 0) {
+  // --- Validações de estrutura (sem itens, os demais campos continuam sendo validados) ---
+  if (!hasOrder) {
+    addError('order', 'Envie os dados do pedido no objeto "order".');
+  }
+  if (items.length === 0) {
     addError('items', 'Envie ao menos um item no array "items".');
+  }
+  if (!hasOrder) {
     return { valid: false, errors };
   }
 
@@ -387,8 +390,8 @@ async function validateOrderPayload(payload) {
   }
 
   // --- Validações dos itens ---
-  for (let i = 0; i < payload.items.length; i++) {
-    const item = payload.items[i] || {};
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i] || {};
 
     if (!item.productId) {
       addError(`items[${i}].productId`, 'Informe o código do produto.');
@@ -402,6 +405,12 @@ async function validateOrderPayload(payload) {
 
     for (const { field, label, integer } of ITEM_NUMBER_FIELDS) {
       checkNumber(`items[${i}].${field}`, label, item[field], integer);
+    }
+
+    // Quantidade zero ou negativa (só quando já é um número válido, sem erro anterior no campo)
+    const quantityPath = `items[${i}].quantity`;
+    if (!errors.some((e) => e.field === quantityPath) && Number(item.quantity) <= 0) {
+      addError(quantityPath, 'Quantidade deve ser maior que zero.', item.quantity);
     }
   }
 
