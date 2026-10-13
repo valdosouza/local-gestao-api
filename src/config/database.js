@@ -64,7 +64,17 @@ function getConnection() {
  */
 const QUERY_TIMEOUT_MS = 30_000;
 
-// READ COMMITTED + NO WAIT + READ ONLY — evita espera por locks em queries de leitura
+// READ COMMITTED + REC_VERSION + READ ONLY + NO WAIT: lê a última versão confirmada
+// sem esperar transações abertas do ERP. A constante ISOLATION_READ_COMMITTED_READ_ONLY
+// do node-firebird usa NO_REC_VERSION + WAIT sem limite, e a leitura ficava parada até o
+// ERP confirmar a gravação (timeouts no /synch). No node-firebird, ISOLATION_READ_UNCOMMITTED
+// é read_committed + rec_version (o Firebird não tem leitura suja).
+const READ_ONLY_TRANSACTION = {
+  isolation: Firebird.ISOLATION_READ_UNCOMMITTED,
+  readOnly:  true,
+  wait:      false,
+};
+
 async function queryReadOnly(sql, params = []) {
   const db = await getConnection();
 
@@ -80,7 +90,7 @@ async function queryReadOnly(sql, params = []) {
       reject(err);
     }, QUERY_TIMEOUT_MS);
 
-    db.transaction(Firebird.ISOLATION_READ_COMMITTED_READ_ONLY, (txErr, transaction) => {
+    db.transaction(READ_ONLY_TRANSACTION, (txErr, transaction) => {
       if (txErr) {
         if (settled) return;
         settled = true;
