@@ -141,6 +141,24 @@ async function isValidPaymentType(paymentTypeId) {
   }
 }
 
+/**
+ * Valida se salesmanId existe em TB_COLABORADOR (cadastro de vendedores — GET /salesmen).
+ * @param {number} salesmanId
+ * @returns {Promise<boolean>}
+ */
+async function isValidSalesman(salesmanId) {
+  try {
+    const rows = await query(
+      'SELECT CLB_CODIGO FROM TB_COLABORADOR WHERE CLB_CODIGO = ?',
+      [Number(salesmanId)]
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error('[VALIDATOR] Erro ao validar salesmanId:', err.message);
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Limites e formatos dos campos gravados no Firebird
 // ---------------------------------------------------------------------------
@@ -160,7 +178,6 @@ const ORDER_TEXT_LIMITS = [
 
 const ORDER_NUMBER_FIELDS = [
   { field: 'userId',           label: 'Usuário',                integer: true },
-  { field: 'salesmanId',       label: 'Vendedor',               integer: true },
   { field: 'quantityProducts', label: 'Quantidade de produtos' },
   { field: 'totalProducts',    label: 'Total dos produtos' },
   { field: 'freightValue',     label: 'Valor do frete' },
@@ -365,6 +382,20 @@ async function validateOrderPayload(payload) {
     checkNumber(`order.${field}`, label, order[field], integer);
   }
 
+  // --- Vendedor: obrigatório, maior que zero e cadastrado ---
+  const { salesmanId } = order;
+  if (!isPresent(salesmanId) || salesmanId === '') {
+    addError('order.salesmanId', 'Informe o código do vendedor (retornado no login).');
+  } else if (typeof salesmanId === 'boolean' || !Number.isInteger(Number(salesmanId)) || Number(salesmanId) <= 0) {
+    addError(
+      'order.salesmanId',
+      'Código de vendedor inválido: informe o código do vendedor (retornado no login). O valor 0 não é aceito.',
+      salesmanId
+    );
+  } else if (!(await isValidSalesman(salesmanId))) {
+    addError('order.salesmanId', 'Vendedor não encontrado. Use um código retornado por GET /salesmen.', salesmanId);
+  }
+
   // --- Validação de institutionId (apenas se informado) ---
   if (order.institutionId) {
     const validInstitution = await isValidInstitution(order.institutionId);
@@ -424,5 +455,6 @@ module.exports = {
   isValidFiscalDocument,
   isValidInstitution,
   isValidPaymentType,
+  isValidSalesman,
   validateOrderPayload,
 };

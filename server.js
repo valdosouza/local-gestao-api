@@ -26,8 +26,29 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use((req, _res, next) => {
+app.use((req, res, next) => {
+  const startedAt = Date.now();
   console.log(`[REQ] ${new Date().toISOString()} ${req.method} ${req.originalUrl}`);
+
+  // Guarda o corpo das respostas de erro para registrar o motivo da recusa
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    if (res.statusCode >= 400) res.locals.errorBody = body;
+    return json(body);
+  };
+
+  // [RES] status + tempo; em erro, as mensagens (campo: motivo), nunca os valores enviados
+  res.on('finish', () => {
+    let line = `[RES] ${new Date().toISOString()} ${req.method} ${req.originalUrl} ${res.statusCode} ${Date.now() - startedAt}ms`;
+    if (res.locals.logContext) line += ` ${res.locals.logContext}`;
+    const body = res.locals.errorBody;
+    if (body) {
+      const reasons = Array.isArray(body.details) ? body.details : [body.error];
+      line += ` | ${reasons.filter(Boolean).join(' | ')}`;
+    }
+    console.log(line);
+  });
+
   next();
 });
 // ----------------------------------------------------------------

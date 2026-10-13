@@ -37,11 +37,13 @@ class OrderSaleItemRepository {
   }
 
   /**
-   * Retorna próximo ITF_CODIGO disponível (MAX + 1) dentro de uma transação.
+   * Próximo ITF_CODIGO pelo gerador GN_ITENS_NFL — o mesmo que o ERP usa.
+   * MAX + 1 não avançava o gerador: o próximo item lançado no ERP recebia o mesmo
+   * código e sobrescrevia o item gravado pela API.
    */
   async #nextCodigo(trx) {
-    const rows = await queryInTransaction(trx, 'SELECT MAX(ITF_CODIGO) AS MAX_ID FROM TB_ITENS_NFL');
-    return (Number(rows[0].MAX_ID) || 0) + 1;
+    const rows = await queryInTransaction(trx, 'SELECT GEN_ID(GN_ITENS_NFL, 1) AS NEW_ID FROM RDB$DATABASE');
+    return Number(rows[0].NEW_ID);
   }
 
   /**

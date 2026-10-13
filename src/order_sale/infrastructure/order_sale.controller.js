@@ -49,6 +49,10 @@ async function listOrderItems(req, res, next) {
  * Valida o payload antes de criar o pedido de venda completo.
  */
 async function createOrder(req, res, next) {
+  // Identificação do pedido na linha [RES] do log
+  const externalId = req.body?.order?.id;
+  res.locals.logContext = `externo=${externalId ?? '-'}`;
+
   try {
     // Executa validações
     const validation = await validateOrderPayload(req.body);
@@ -62,6 +66,7 @@ async function createOrder(req, res, next) {
 
     // Se passou nas validações, cria o pedido
     const result = await orderSaleService.createOrder(req.body);
+    res.locals.logContext += ` pedido=${result.order.id} itens=${result.items.length}`;
     res.status(201).json(result);
   } catch (err) {
     next(err);

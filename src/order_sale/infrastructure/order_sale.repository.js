@@ -86,15 +86,9 @@ class OrderSaleRepository {
    * @returns {Promise<OrderSale>}
    */
   async create(data) {
-    let newId;
-    try {
-      const genRows = await query('SELECT GEN_ID(GN_PEDIDO, 1) AS NEW_ID FROM RDB$DATABASE');
-      newId = genRows[0].NEW_ID;
-    } catch (err) {
-      // Fallback: se gerador não existir, usa MAX+1
-      const maxRows = await query('SELECT MAX(PED_CODIGO) AS MAX_ID FROM TB_PEDIDO');
-      newId = (Number(maxRows[0]?.MAX_ID) || 0) + 1;
-    }
+    // Sem fallback para MAX + 1: o ERP usa GN_PEDIDO e o código colidiria com o próximo dele
+    const genRows = await query('SELECT GEN_ID(GN_PEDIDO, 1) AS NEW_ID FROM RDB$DATABASE');
+    const newId = genRows[0].NEW_ID;
 
     await withTransaction(async (trx) => {
       await queryInTransaction(trx, `
