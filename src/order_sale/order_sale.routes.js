@@ -30,8 +30,18 @@ const router = Router();
  *       Ordenados do mais recente para o mais antigo (número interno decrescente).
  *       Cada pedido traz `externalId`/`externalSource` quando foi recebido por integração
  *       (API ou MAGAZORD); pedidos lançados direto no Gestão vêm com esses campos nulos.
+ *
+ *       Para achar o número interno a partir do código do seu sistema:
+ *       `GET /order-sales?externalId=PED-2026-0001`.
  *     tags: [Order Sales]
  *     parameters:
+ *       - in: query
+ *         name: externalId
+ *         schema: { type: string, maxLength: 50, example: "PED-2026-0001" }
+ *         description: |
+ *           Código do pedido no sistema de origem (o `order.id` enviado no POST), comparação exata.
+ *           Procura em qualquer origem (API ou MAGAZORD) e combina com os demais filtros.
+ *           Sem pedido vinculado, retorna `data: []` e `meta.total: 0`.
  *       - in: query
  *         name: limit
  *         schema: { type: integer, default: 20, minimum: 1, maximum: 100 }

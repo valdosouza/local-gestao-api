@@ -52,6 +52,25 @@ class OrderSaleRepository {
     const conditions = ['p.PED_TIPO = 1'];
     const params = [];
 
+    // Código externo: resolve antes os números internos vinculados (qualquer origem) e filtra
+    // pela PK. IN (subconsulta) no Firebird 2.5 vira busca correlacionada, pedido a pedido.
+    if (filters.externalId !== undefined && filters.externalId !== '') {
+      const externalId = String(filters.externalId).trim();
+      // ID_EXTERIOR é VARCHAR(50) WIN1252: código maior ou com caractere fora disso não existe
+      // (e o parâmetro daria erro de truncamento/transliteração no Firebird)
+      if (externalId.length > 50 || [...externalId].some((ch) => ch.codePointAt(0) > 0xFF)) {
+        return { data: [], total: 0 };
+      }
+      const links = await query(
+        'SELECT TB_PEDIDO_ID FROM TB_PEDIDO_FROM_EXTERIOR WHERE ID_EXTERIOR = ?',
+        [externalId]
+      );
+      const ids = [...new Set(links.map((l) => Number(l.TB_PEDIDO_ID)))].filter(Number.isFinite);
+      if (!ids.length) return { data: [], total: 0 };
+      conditions.push(`p.PED_CODIGO IN (${ids.map(() => '?').join(', ')})`);
+      params.push(...ids);
+    }
+
     if (filters.institutionId) {
       conditions.push('p.PED_CODMHA = ?');
       params.push(Number(filters.institutionId));
