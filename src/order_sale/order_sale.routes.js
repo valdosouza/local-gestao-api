@@ -176,9 +176,8 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  *       - Envios simultâneos do mesmo código também resultam em um único pedido; os demais recebem 409.
  *       - Exceção: se o pedido vinculado foi apagado do Gestão, o código é liberado e um novo pedido é gravado.
  *
- *       **Gravação tudo-ou-nada**: vínculo, cliente, endereço, pedido, itens e estoque são gravados numa
- *       única transação. Se a resposta for um erro (400/500) ou não chegar, nada ficou gravado — é seguro
- *       reenviar o mesmo pedido.
+ *       **Erro 500 ou sem resposta**: reenvie o mesmo pedido. Se ele não chegou a ser gravado (ou ficou
+ *       pela metade, sem itens), o reenvio grava; se já foi gravado, o reenvio recebe 409 com o pedido.
  *
  *       **Validação antes de gravar**: nada é gravado se houver qualquer problema. Todos os problemas vêm
  *       de uma vez, com o caminho do campo e como corrigir:

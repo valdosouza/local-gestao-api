@@ -1,6 +1,5 @@
 'use strict';
 
-const { withTransaction }     = require('../../config/database');
 const orderSaleRepository     = require('../infrastructure/order_sale.repository');
 const orderSaleItemRepository = require('../infrastructure/order_sale.item.repository');
 const stockControlRepository  = require('../../stock_control/infrastructure/stock_control.repository');
@@ -90,7 +89,7 @@ async function listOrderItems(orderId) {
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline: Criação de pedido de venda completo — tudo em UMA transação
+// Pipeline: Criação de pedido de venda completo — passo a passo (ver createOrder)
 //
 // Referência Delphi: GeraPedidoCompleto (tas_mg_pedido.pas, linha 265), com uma diferença:
 // código externo já recebido NÃO é regravado — a API responde 409 com o pedido existente.
@@ -128,7 +127,11 @@ async function createOrder(payload) {
   const externalId = String(order.id);
 
   try {
-    return await withTransaction((trx) => persistOrder(trx, { order, items, externalId, parsedDate }));
+    // Gravação passo a passo, cada passo na sua transação curta (trx = null). Numa transação
+    // única com várias instruções, o protocolo "lazy" do node-firebird 1.1.10 desalinha as
+    // respostas: o driver quebrou ou deixou a transação aberta para sempre (produção, 14/10
+    // 14:04 e 14:13), travando os pedidos seguintes. Não voltar a usar withTransaction aqui.
+    return await persistOrder(null, { order, items, externalId, parsedDate });
   } catch (err) {
     // Dois envios simultâneos do mesmo código: o outro gravou o vínculo primeiro
     if (isDuplicateLinkError(err)) {
@@ -141,16 +144,21 @@ async function createOrder(payload) {
 }
 
 /**
- * Grava o pedido completo dentro da transação recebida. Se qualquer passo falhar,
- * nada fica gravado: nem vínculo, nem cliente, nem cabeçalho sem itens.
+ * Grava o pedido completo. Com trx, tudo dentro dela; sem trx (uso atual), cada passo
+ * na sua transação curta. O vínculo é gravado primeiro: se um passo seguinte falhar, o
+ * reenvio encontra o vínculo sem pedido e libera o código (passo 1).
  */
 async function persistOrder(trx, { order, items, externalId, parsedDate }) {
   // --- 1. Código externo já recebido? Não regrava: devolve o pedido existente (409) ---
   const existingLink = await orderSaleRepository.findFromExterior(externalId, FROM_EXTERIOR_KIND, trx);
   if (existingLink) {
     const existingOrder = await orderSaleRepository.findById(existingLink.orderId, trx);
-    if (existingOrder) throw alreadyReceived(externalId, existingOrder);
-    // Vínculo sem pedido (apagado no ERP): libera o código para um pedido novo
+    // Aberto e sem itens = gravação anterior interrompida (pedido da API sempre tem item)
+    const interrupted = existingOrder && existingOrder.invoiced === 'N'
+      && (await orderSaleItemRepository.findByOrderId(existingOrder.id)).length === 0;
+    if (existingOrder && !interrupted) throw alreadyReceived(externalId, existingOrder);
+    if (interrupted) await orderSaleRepository.delete(existingOrder.id);
+    // Vínculo sem pedido (apagado no ERP) ou de gravação interrompida: libera o código
     await orderSaleRepository.deleteFromExterior(externalId, FROM_EXTERIOR_KIND, trx);
   }
 
