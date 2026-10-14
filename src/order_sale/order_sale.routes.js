@@ -244,7 +244,7 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  *                 type: 1
  *                 userId: 3
  *                 date: "2026-10-14"
- *                 hour: "08:30"
+ *                 hour: "08:30:00"
  *                 customerId: 80297
  *                 salesmanId: 7
  *                 paymentTypeId: 1
@@ -352,9 +352,8 @@ router.post('/', orderSaleCtrl.createOrder);
  *     OrderSale:
  *       type: object
  *       description: |
- *         Datas e hora: no POST voltam como foram enviadas (ex.: "2026-10-14", "08:30");
- *         nos GETs voltam como data/hora ISO em UTC (ex.: date "2026-10-14T03:00:00.000Z",
- *         hour "1970-01-01T11:30:00.000Z").
+ *         Datas e hora no mesmo formato no POST e nos GETs: `date`/`deliveryDate` em AAAA-MM-DD e
+ *         `hour` em HH:MM:SS (horário de Brasília). `updatedAt` é data/hora ISO em UTC.
  *       properties:
  *         id:                  { type: integer, example: 375085, description: "Número interno do pedido no Gestão (PED_CODIGO)." }
  *         externalId:          { type: string, nullable: true, example: "PED-2026-0001", description: "Código do pedido no sistema de origem (TB_PEDIDO_FROM_EXTERIOR.ID_EXTERIOR) — o order.id enviado no POST. Nulo para pedidos lançados direto no Gestão." }
@@ -362,8 +361,8 @@ router.post('/', orderSaleCtrl.createOrder);
  *         number:              { type: integer, example: 1050, nullable: true }
  *         type:                { type: integer, example: 1, description: "1 = Venda" }
  *         userId:              { type: integer, example: 3 }
- *         date:                { type: string, example: "2026-10-14" }
- *         hour:                { type: string, example: "08:30", nullable: true }
+ *         date:                { type: string, format: date, example: "2026-10-14", description: "AAAA-MM-DD" }
+ *         hour:                { type: string, example: "08:30:00", nullable: true, description: "HH:MM:SS (horário de Brasília)" }
  *         customerId:          { type: integer, example: 80297, description: "Cliente (TB_EMPRESA.EMP_CODIGO), encontrado ou criado pelo CPF/CNPJ" }
  *         salesmanId:          { type: integer, example: 7, nullable: true }
  *         paymentTypeId:       { type: integer, example: 1, nullable: true }
@@ -384,14 +383,14 @@ router.post('/', orderSaleCtrl.createOrder);
  *         observation:         { type: string, nullable: true }
  *         presenceIndicator:   { type: integer, example: 2 }
  *         terminal:            { type: integer, example: 0 }
- *         deliveryDate:        { type: string, nullable: true }
+ *         deliveryDate:        { type: string, format: date, nullable: true, description: "AAAA-MM-DD" }
  *         approved:            { type: string, example: "N" }
  *         budgetId:            { type: integer, nullable: true }
  *         webId:               { type: integer, nullable: true }
  *         webNumber:           { type: integer, nullable: true }
  *         carrierCode:         { type: integer, nullable: true }
  *         natureCode:          { type: integer, nullable: true }
- *         updatedAt:           { type: string, format: date-time, nullable: true }
+ *         updatedAt:           { type: string, format: date-time, nullable: true, example: "2026-10-14T15:28:39.000Z", description: "Última alteração (ISO, UTC)" }
  *
  *     OrderSaleItem:
  *       type: object

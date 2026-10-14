@@ -1,5 +1,30 @@
 'use strict';
 
+const pad2 = (n) => String(n).padStart(2, '0');
+
+/**
+ * DATE → "AAAA-MM-DD". O node-firebird entrega DATE como Date à meia-noite no fuso do
+ * servidor; os componentes locais evitam o deslocamento do toISOString() (UTC).
+ * Strings (resposta do POST) já chegam em AAAA-MM-DD.
+ */
+function formatDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) {
+    return `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`;
+  }
+  return String(value).slice(0, 10);
+}
+
+/** TIME → "HH:MM:SS". Date do driver (01/01/1970 + hora local) ou string "H:MM[:SS]". */
+function formatTime(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date) {
+    return `${pad2(value.getHours())}:${pad2(value.getMinutes())}:${pad2(value.getSeconds())}`;
+  }
+  const match = String(value).match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  return match ? `${pad2(match[1])}:${match[2]}:${match[3] ?? '00'}` : String(value);
+}
+
 /**
  * Entidade OrderSale — espelho de TB_PEDIDO.
  * Mapeada a partir do modelo Delphi TPedido (tblPedido.pas).
@@ -10,8 +35,8 @@ class OrderSale {
     this.number              = row.PED_NUMERO          ?? null;
     this.type                = row.PED_TIPO            ?? null;
     this.userId              = row.PED_CODUSU          ?? null;
-    this.date                = row.PED_DATA            ?? null;
-    this.hour                = row.PED_HORA            ?? null;
+    this.date                = formatDate(row.PED_DATA);
+    this.hour                = formatTime(row.PED_HORA);
     this.customerId          = row.PED_CODEMP          ?? null;
     this.salesmanId          = row.PED_CODVDO          ?? null;
     this.paymentTypeId       = row.PED_CODFPG          ?? null;
@@ -32,7 +57,7 @@ class OrderSale {
     this.observation         = row.PED_OBS != null      ? String(row.PED_OBS).trim() : null;
     this.presenceIndicator   = row.PED_INDPRES         ?? 2;
     this.terminal            = row.PED_TERMINAL        ?? 0;
-    this.deliveryDate        = row.PED_DT_ENTREGA      ?? null;
+    this.deliveryDate        = formatDate(row.PED_DT_ENTREGA);
     this.approved            = row.PED_APROVADO        ? row.PED_APROVADO.trim() : 'N';
     this.budgetId            = row.PED_NUM_ORCA        ?? null;
     this.webId               = row.PED_CODWEB          ?? null;
