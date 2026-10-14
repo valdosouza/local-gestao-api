@@ -283,6 +283,12 @@ async function validateOrderPayload(payload) {
   const { order } = payload;
 
   // --- Validações obrigatórias ---
+  if (!isPresent(order.id) || String(order.id).trim() === '') {
+    addError(
+      'order.id',
+      'Informe o código externo do pedido (o código do pedido no seu sistema). Ele evita pedido duplicado e permite reenviar o mesmo pedido.'
+    );
+  }
   if (!order.userId) {
     addError('order.userId', 'Informe o código do usuário (retornado no login).');
   }

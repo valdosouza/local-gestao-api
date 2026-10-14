@@ -16,6 +16,36 @@ const SELECT_COLS = `
 
 class OrderSaleRepository {
   /**
+   * Monta as entidades com o código externo de TB_PEDIDO_FROM_EXTERIOR.
+   * Uma única consulta para a página inteira (a tabela não tem índice em TB_PEDIDO_ID,
+   * e um JOIN varreria a tabela uma vez por pedido). Se houver mais de um vínculo
+   * para o mesmo pedido, prevalece o da API.
+   * @returns {Promise<OrderSale[]>}
+   */
+  async #withExternalLinks(rows) {
+    if (!rows.length) return [];
+
+    const ids = rows.map((r) => Number(r.PED_CODIGO));
+    const links = await query(
+      `SELECT TB_PEDIDO_ID, ID_EXTERIOR, KIND
+       FROM TB_PEDIDO_FROM_EXTERIOR
+       WHERE TB_PEDIDO_ID IN (${ids.map(() => '?').join(', ')})`,
+      ids
+    );
+
+    const byOrder = new Map();
+    for (const link of links) {
+      const isApi = String(link.KIND).trim() === 'API';
+      if (!byOrder.has(link.TB_PEDIDO_ID) || isApi) byOrder.set(link.TB_PEDIDO_ID, link);
+    }
+
+    return rows.map((r) => {
+      const link = byOrder.get(r.PED_CODIGO);
+      return new OrderSale({ ...r, ID_EXTERIOR: link?.ID_EXTERIOR, KIND: link?.KIND });
+    });
+  }
+
+  /**
    * Lista pedidos de venda com filtros e paginação.
    */
   async findAll({ limit = 20, offset = 0, filters = {} } = {}) {
@@ -64,7 +94,7 @@ class OrderSaleRepository {
       [Number(limit), Number(offset), ...params]
     );
 
-    return { data: rows.map((r) => new OrderSale(r)), total };
+    return { data: await this.#withExternalLinks(rows), total };
   }
 
   /**
@@ -77,7 +107,8 @@ class OrderSaleRepository {
       [Number(id)]
     );
     if (!rows.length) return null;
-    return new OrderSale(rows[0]);
+    const [order] = await this.#withExternalLinks(rows);
+    return order;
   }
 
   /**

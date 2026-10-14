@@ -86,6 +86,9 @@ async function createOrder(payload) {
 
   // --- Validações de entrada ---
   if (!order)              throw badRequest('Objeto "order" é obrigatório.');
+  if (order.id === undefined || order.id === null || String(order.id).trim() === '') {
+    throw badRequest('Campo obrigatório ausente: order.id (código externo do pedido).');
+  }
   if (!order.userId)       throw badRequest('Campo obrigatório ausente: order.userId.');
   if (!order.date)         throw badRequest('Campo obrigatório ausente: order.date.');
   if (!order.fiscalDocument) throw badRequest('Campo obrigatório ausente: order.fiscalDocument.');
@@ -102,7 +105,7 @@ async function createOrder(payload) {
   }
 
   const parsedDate = parseDate(order.date);
-  const externalId = order.id ? String(order.id) : null;
+  const externalId = String(order.id);
 
   // --- 1. ValidaGeraPedidoCompleto: verifica se pedido já existe via FROM_EXTERIOR ---
   if (externalId) {
@@ -256,9 +259,10 @@ async function createOrder(payload) {
   }
 
   // --- 5. GeraVinculoFromExterior: vincula código externo ao interno ---
-  if (externalId) {
-    await orderSaleRepository.insertFromExterior(externalId, FROM_EXTERIOR_KIND, createdOrder.id);
-  }
+  await orderSaleRepository.insertFromExterior(externalId, FROM_EXTERIOR_KIND, createdOrder.id);
+  // Devolve o código externo junto do número interno (order.id do payload ≠ order.id da resposta)
+  createdOrder.externalId     = externalId;
+  createdOrder.externalSource = FROM_EXTERIOR_KIND;
 
   return {
     order: createdOrder.toJSON(),

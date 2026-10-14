@@ -40,11 +40,16 @@ class OrderSale {
     this.carrierCode         = row.PED_CODTRP          ?? null;
     this.natureCode          = row.PED_CODNAT          ?? null;
     this.updatedAt           = row.PED_DT_ALTERA       ?? null;
+    // Vínculo em TB_PEDIDO_FROM_EXTERIOR (código do sistema de origem e KIND: API, MAGAZORD...)
+    this.externalId          = row.ID_EXTERIOR         ? String(row.ID_EXTERIOR).trim() : null;
+    this.externalSource      = row.KIND                ? String(row.KIND).trim()        : null;
   }
 
   toJSON() {
     return {
       id:                  this.id,
+      externalId:          this.externalId,
+      externalSource:      this.externalSource,
       number:              this.number,
       type:                this.type,
       userId:              this.userId,
