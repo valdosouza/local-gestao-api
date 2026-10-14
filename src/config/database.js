@@ -143,7 +143,7 @@ async function query(sql, params = []) {
  *
  * @param {Function} callback - async (transaction) => { ... }
  *   Dentro do callback, use: await queryInTransaction(transaction, sql, params)
- * @returns {Promise<void>}
+ * @returns {Promise<*>} O valor retornado pelo callback, após o commit
  */
 async function withTransaction(callback) {
   const db = await getConnection();
@@ -156,12 +156,12 @@ async function withTransaction(callback) {
       }
 
       try {
-        await callback(transaction);
+        const result = await callback(transaction);
 
         transaction.commit((commitErr) => {
           db.detach();
           if (commitErr) return reject(commitErr);
-          resolve();
+          resolve(result);
         });
       } catch (callbackErr) {
         transaction.rollback(() => {
@@ -191,6 +191,22 @@ function queryInTransaction(transaction, sql, params = []) {
 }
 
 /**
+ * Executa na transação recebida ou, sem ela, numa conexão própria (autocommit).
+ * Permite que um repositório participe de uma transação maior (ex.: gravação do pedido).
+ */
+function runQuery(transaction, sql, params = []) {
+  return transaction ? queryInTransaction(transaction, sql, params) : query(sql, params);
+}
+
+/**
+ * Usa a transação recebida ou abre uma nova, com commit/rollback automáticos.
+ * @returns {Promise<*>} O valor retornado pelo callback
+ */
+function inTransaction(transaction, callback) {
+  return transaction ? callback(transaction) : withTransaction(callback);
+}
+
+/**
  * Encerra o pool de conexões (para uso em testes ou graceful shutdown).
  */
 function destroyPool() {
@@ -211,5 +227,7 @@ module.exports = {
   queryReadOnly,
   withTransaction,
   queryInTransaction,
+  runQuery,
+  inTransaction,
   destroyPool,
 };

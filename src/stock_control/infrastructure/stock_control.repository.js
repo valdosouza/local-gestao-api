@@ -1,11 +1,11 @@
 'use strict';
 
-const { query, withTransaction, queryInTransaction } = require('../../config/database');
+const { query, withTransaction, queryInTransaction, runQuery, inTransaction } = require('../../config/database');
 const StockControl = require('../domain/stock_control.entity');
 
 class StockControlRepository {
-  async findById(id, terminal) {
-    const rows = await query(
+  async findById(id, terminal, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT CET_CODIGO, CET_TERMINAL, CET_VINCULO, CET_CONTROLE, CET_ITEM_CTRL,
               CET_CODETS, CET_OPERACAO, CET_CODPRO, CET_QTDE, CET_DATA, UPDATE_AT, CET_TIPO
        FROM TB_CTRL_ESTOQUE
@@ -16,14 +16,15 @@ class StockControlRepository {
     return new StockControl(rows[0]);
   }
 
-  async create(data) {
-    const genRows = await query(
+  /** Com trx, grava dentro dela; sem trx, numa transação própria. */
+  async create(data, trx = null) {
+    const genRows = await runQuery(trx,
       'SELECT GEN_ID(GN_CTRL_ESTOQUE, 1) AS NEW_ID FROM RDB$DATABASE'
     );
     const newId = genRows[0].NEW_ID;
 
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx,
+    return inTransaction(trx, async (t) => {
+      await queryInTransaction(t,
         `INSERT INTO TB_CTRL_ESTOQUE (
           CET_CODIGO, CET_TERMINAL, CET_VINCULO, CET_CONTROLE, CET_ITEM_CTRL,
           CET_CODETS, CET_OPERACAO, CET_CODPRO, CET_QTDE, CET_DATA, UPDATE_AT, CET_TIPO
@@ -42,9 +43,9 @@ class StockControlRepository {
           data.type        ?? null,
         ]
       );
-    });
 
-    return this.findById(newId, data.terminal);
+      return this.findById(newId, data.terminal, t);
+    });
   }
 
   /**

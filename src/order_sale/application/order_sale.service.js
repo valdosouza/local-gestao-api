@@ -1,5 +1,6 @@
 'use strict';
 
+const { withTransaction }     = require('../../config/database');
 const orderSaleRepository     = require('../infrastructure/order_sale.repository');
 const orderSaleItemRepository = require('../infrastructure/order_sale.item.repository');
 const stockControlRepository  = require('../../stock_control/infrastructure/stock_control.repository');
@@ -17,6 +18,25 @@ function badRequest(msg) {
   const err = new Error(msg);
   err.status = 400;
   return err;
+}
+
+const INVOICED_LABEL = { N: 'aberto', S: 'faturado', A: 'na lixeira', C: 'cancelado' };
+
+/** Código externo já recebido pela API: 409 com o pedido existente — nada é alterado. */
+function alreadyReceived(externalId, existingOrder) {
+  const situation = INVOICED_LABEL[existingOrder.invoiced] ?? existingOrder.invoiced;
+  const err = new Error(
+    `Pedido já recebido: o código externo "${externalId}" é o pedido interno ${existingOrder.id} (${situation}). Nada foi alterado.`
+  );
+  err.status = 409;
+  err.order  = existingOrder.toJSON();
+  return err;
+}
+
+/** Violação da chave (KIND, ID_EXTERIOR): outro envio do mesmo código gravou o vínculo antes. */
+function isDuplicateLinkError(err) {
+  const msg = err?.message ?? '';
+  return /PRIMARY or UNIQUE KEY/i.test(msg) && /TB_PEDIDO_FROM_EXTERIOR/i.test(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -70,15 +90,15 @@ async function listOrderItems(orderId) {
 }
 
 // ---------------------------------------------------------------------------
-// Pipeline: Criação de pedido de venda completo
+// Pipeline: Criação de pedido de venda completo — tudo em UMA transação
 //
-// Referência Delphi: GeraPedidoCompleto (tas_mg_pedido.pas, linha 265)
-//   1. ValidaGeraPedidoCompleto — verifica TB_PEDIDO_FROM_EXTERIOR
-//   2. Se pedido anterior existe: DesregistrarEstoque → DeletaItens → Delete
+// Referência Delphi: GeraPedidoCompleto (tas_mg_pedido.pas, linha 265), com uma diferença:
+// código externo já recebido NÃO é regravado — a API responde 409 com o pedido existente.
+//   1. Verifica TB_PEDIDO_FROM_EXTERIOR (KIND = 'API')
+//   2. Reserva PED_CODIGO (GN_PEDIDO) e grava o vínculo (GeraVinculoFromExterior)
 //   3. ValidaCreateClienteSetes — busca/cria empresa + cliente + endereço
 //   4. GeraPedido — insere TB_PEDIDO
 //   5. GeraPedidoItens — insere TB_ITENS_NFL + TB_CTRL_ESTOQUE
-//   6. GeraVinculoFromExterior — insere TB_PEDIDO_FROM_EXTERIOR
 // ---------------------------------------------------------------------------
 
 async function createOrder(payload) {
@@ -107,48 +127,53 @@ async function createOrder(payload) {
   const parsedDate = parseDate(order.date);
   const externalId = String(order.id);
 
-  // --- 1. ValidaGeraPedidoCompleto: verifica se pedido já existe via FROM_EXTERIOR ---
-  if (externalId) {
-    const existingLink = await orderSaleRepository.findFromExterior(externalId, FROM_EXTERIOR_KIND);
-
-    if (existingLink) {
-      const existingOrder = await orderSaleRepository.findById(existingLink.orderId);
-      if (existingOrder) {
-        // Verifica status do pedido: só permite se estiver 'N' (aberto)
-        if (existingOrder.invoiced === 'S') {
-          throw badRequest(`Pedido já processado. Faturado. Código externo: "${externalId}", Pedido interno: ${existingOrder.id}`);
-        }
-        if (existingOrder.invoiced === 'A') {
-          throw badRequest(`Pedido já processado. Excluído. Código externo: "${externalId}", Pedido interno: ${existingOrder.id}`);
-        }
-        if (existingOrder.invoiced === 'C') {
-          throw badRequest(`Pedido já processado. Cancelado. Código externo: "${externalId}", Pedido interno: ${existingOrder.id}`);
-        }
-        // Pedido existe mas está 'N' (aberto): limpa para regravar
-        // Reverte movimentos de estoque (em vez de deletar, para manter rastreamento)
-        await stockControlRepository.reverseOrderStockEntries(existingOrder.id, parsedDate);
-        await orderSaleItemRepository.deleteByOrderId(existingOrder.id);
-        await orderSaleRepository.delete(existingOrder.id);
-      }
-      await orderSaleRepository.deleteFromExterior(externalId, FROM_EXTERIOR_KIND);
+  try {
+    return await withTransaction((trx) => persistOrder(trx, { order, items, externalId, parsedDate }));
+  } catch (err) {
+    // Dois envios simultâneos do mesmo código: o outro gravou o vínculo primeiro
+    if (isDuplicateLinkError(err)) {
+      const link = await orderSaleRepository.findFromExterior(externalId, FROM_EXTERIOR_KIND);
+      const existingOrder = link && await orderSaleRepository.findById(link.orderId);
+      if (existingOrder) throw alreadyReceived(externalId, existingOrder);
     }
+    throw err;
+  }
+}
+
+/**
+ * Grava o pedido completo dentro da transação recebida. Se qualquer passo falhar,
+ * nada fica gravado: nem vínculo, nem cliente, nem cabeçalho sem itens.
+ */
+async function persistOrder(trx, { order, items, externalId, parsedDate }) {
+  // --- 1. Código externo já recebido? Não regrava: devolve o pedido existente (409) ---
+  const existingLink = await orderSaleRepository.findFromExterior(externalId, FROM_EXTERIOR_KIND, trx);
+  if (existingLink) {
+    const existingOrder = await orderSaleRepository.findById(existingLink.orderId, trx);
+    if (existingOrder) throw alreadyReceived(externalId, existingOrder);
+    // Vínculo sem pedido (apagado no ERP): libera o código para um pedido novo
+    await orderSaleRepository.deleteFromExterior(externalId, FROM_EXTERIOR_KIND, trx);
   }
 
-  // --- 2. ValidaCreateClienteSetes: busca ou cria empresa/cliente/endereço ---
+  // --- 2. Reserva o número interno e grava o vínculo antes do resto. Em dois envios
+  //        simultâneos do mesmo código, o segundo espera aqui e falha na chave do vínculo ---
+  const orderId = await orderSaleRepository.nextId(trx);
+  await orderSaleRepository.insertFromExterior(externalId, FROM_EXTERIOR_KIND, orderId, trx);
+
+  // --- 3. ValidaCreateClienteSetes: busca ou cria empresa/cliente/endereço ---
   let customerId;
   let addressId;
 
-  const existingEmpresa = await orderSaleRepository.findEmpresaByDocument(order.fiscalDocument);
+  const existingEmpresa = await orderSaleRepository.findEmpresaByDocument(order.fiscalDocument, trx);
 
   if (existingEmpresa) {
     customerId = existingEmpresa.id;
 
-    const isCliente = await orderSaleRepository.clienteExists(customerId);
+    const isCliente = await orderSaleRepository.clienteExists(customerId, trx);
     if (!isCliente) {
-      await orderSaleRepository.createCliente(customerId);
+      await orderSaleRepository.createCliente(customerId, trx);
     }
 
-    const endereco = await orderSaleRepository.findEnderecoPrincipal(customerId);
+    const endereco = await orderSaleRepository.findEnderecoPrincipal(customerId, trx);
     if (endereco) {
       addressId = endereco.id;
     } else {
@@ -162,7 +187,7 @@ async function createOrder(payload) {
         zipcode:           order.zipcode,
         cityName:          order.cityName,
         stateAbbreviation: order.stateAbbreviation,
-      });
+      }, trx);
     }
   } else {
     customerId = await orderSaleRepository.createEmpresa({
@@ -171,9 +196,9 @@ async function createOrder(payload) {
       email:             order.email,
       birthFoundation:   parseDate(order.birthFoundation),
       salesmanId:        order.salesmanId,
-    });
+    }, trx);
 
-    await orderSaleRepository.createCliente(customerId);
+    await orderSaleRepository.createCliente(customerId, trx);
 
     addressId = await orderSaleRepository.createEndereco({
       empCodigo:         customerId,
@@ -185,11 +210,12 @@ async function createOrder(payload) {
       zipcode:           order.zipcode,
       cityName:          order.cityName,
       stateAbbreviation: order.stateAbbreviation,
-    });
+    }, trx);
   }
 
-  // --- 3. GeraPedido: insere cabeçalho em TB_PEDIDO ---
+  // --- 4. GeraPedido: insere cabeçalho em TB_PEDIDO com o número reservado ---
   const createdOrder = await orderSaleRepository.create({
+    id:                orderId,
     type:              1,
     userId:            order.userId,
     date:              parsedDate,
@@ -213,9 +239,9 @@ async function createOrder(payload) {
     presenceIndicator: 2,
     terminal:          0,
     approved:          'N',
-  });
+  }, trx);
 
-  // --- 4. GeraPedidoItens: insere itens em TB_ITENS_NFL + registra estoque ---
+  // --- 5. GeraPedidoItens: insere itens em TB_ITENS_NFL + registra estoque ---
   const insertedItems = [];
 
   for (let seq = 0; seq < items.length; seq++) {
@@ -237,7 +263,7 @@ async function createOrder(payload) {
       operation:   'V',
       stockListId: itemData.stockListId ?? null,
       priceListId: itemData.priceListId ?? null,
-    });
+    }, trx);
 
     insertedItems.push(item.toJSON());
 
@@ -254,12 +280,10 @@ async function createOrder(payload) {
         quantity:    item.quantity,
         date:        parsedDate,
         type:        'Venda',
-      });
+      }, trx);
     }
   }
 
-  // --- 5. GeraVinculoFromExterior: vincula código externo ao interno ---
-  await orderSaleRepository.insertFromExterior(externalId, FROM_EXTERIOR_KIND, createdOrder.id);
   // Devolve o código externo junto do número interno (order.id do payload ≠ order.id da resposta)
   createdOrder.externalId     = externalId;
   createdOrder.externalSource = FROM_EXTERIOR_KIND;

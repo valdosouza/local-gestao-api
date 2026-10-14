@@ -1,6 +1,6 @@
 'use strict';
 
-const { query, withTransaction, queryInTransaction } = require('../../config/database');
+const { query, queryInTransaction, runQuery, inTransaction } = require('../../config/database');
 const OrderSaleItem = require('../domain/order_sale.item.entity');
 
 const SELECT_COLS = `
@@ -27,8 +27,8 @@ class OrderSaleItemRepository {
    * Busca um item pelo ID.
    * @returns {Promise<OrderSaleItem|null>}
    */
-  async findById(id) {
-    const rows = await query(
+  async findById(id, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT ${SELECT_COLS} FROM TB_ITENS_NFL WHERE ITF_CODIGO = ?`,
       [Number(id)]
     );
@@ -49,15 +49,14 @@ class OrderSaleItemRepository {
   /**
    * Insere um item de pedido de venda.
    * Referência Delphi: GeraPedidoItens (tas_mg_pedido.pas, linha 289).
+   * Com trx, grava dentro dela; sem trx, numa transação própria.
    * @returns {Promise<OrderSaleItem>}
    */
-  async create(data) {
-    let newId;
+  async create(data, trx = null) {
+    return inTransaction(trx, async (t) => {
+      const newId = await this.#nextCodigo(t);
 
-    await withTransaction(async (trx) => {
-      newId = await this.#nextCodigo(trx);
-
-      await queryInTransaction(trx, `
+      await queryInTransaction(t, `
         INSERT INTO TB_ITENS_NFL (
           ITF_CODIGO, ITF_SEQUENCIA, ITF_CODPED, ITF_CODNFL,
           ITF_CODPRO, ITF_QTDE, ITF_VL_CUSTO, ITF_VL_UNIT,
@@ -89,9 +88,9 @@ class OrderSaleItemRepository {
         data.stockListId ?? null,
         data.priceListId ?? null,
       ]);
-    });
 
-    return this.findById(newId);
+      return this.findById(newId, t);
+    });
   }
 
   /**

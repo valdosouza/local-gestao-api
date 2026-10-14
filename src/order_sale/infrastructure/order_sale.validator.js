@@ -286,7 +286,7 @@ async function validateOrderPayload(payload) {
   if (!isPresent(order.id) || String(order.id).trim() === '') {
     addError(
       'order.id',
-      'Informe o código externo do pedido (o código do pedido no seu sistema). Ele evita pedido duplicado e permite reenviar o mesmo pedido.'
+      'Informe o código externo do pedido (o código do pedido no seu sistema). Ele identifica o pedido e impede que seja gravado duas vezes.'
     );
   }
   if (!order.userId) {
@@ -431,8 +431,10 @@ async function validateOrderPayload(payload) {
     }
   }
 
-  // --- Validação de paymentTypeId (apenas se informado) ---
-  if (order.paymentTypeId) {
+  // --- Forma de pagamento: obrigatória (o gatilho de backup TB_PEDIDO_BKP exige PED_CODFPG) ---
+  if (!order.paymentTypeId) {
+    addError('order.paymentTypeId', 'Informe a forma de pagamento. Use um código retornado por GET /payment-types.');
+  } else {
     const validPaymentType = await isValidPaymentType(order.paymentTypeId);
     if (!validPaymentType) {
       addError(

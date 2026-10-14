@@ -148,7 +148,7 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  * @swagger
  * /order-sales:
  *   post:
- *     summary: Cria (ou regrava) um pedido de venda completo
+ *     summary: Cria um pedido de venda completo
  *     description: |
  *       Grava o cliente (se o CPF/CNPJ ainda não existir), o endereço, o pedido, os itens e a saída de
  *       estoque, sempre com os códigos do Gestão. O código do pedido no **seu** sistema vai em `order.id`
@@ -159,18 +159,23 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  *       - Na resposta, `order.id` é o número interno do Gestão (PED_CODIGO) e o seu código volta em
  *         `order.externalId` (com `order.externalSource = "API"`).
  *
- *       **Reenvio do mesmo `order.id`**
- *       - Pedido ainda aberto no Gestão (`invoiced = N`): o pedido anterior tem o estoque estornado e é
- *         apagado, e o novo é gravado **com outro número interno**. Guarde o `externalId` como referência
- *         estável e atualize o número interno a cada resposta.
- *       - Pedido faturado (`S`), na lixeira (`A`) ou cancelado (`C`): 400 "Pedido já processado" e nada é alterado.
+ *       **Cada código é gravado uma única vez**
+ *       - Se o `order.id` já foi recebido pela API, **nada é gravado nem alterado** e a resposta é
+ *         **409** com o pedido existente em `order` — qualquer que seja a situação dele (aberto,
+ *         faturado, na lixeira ou cancelado). Correções no pedido são feitas no Gestão.
+ *       - Envios simultâneos do mesmo código também resultam em um único pedido; os demais recebem 409.
+ *       - Exceção: se o pedido vinculado foi apagado do Gestão, o código é liberado e um novo pedido é gravado.
+ *
+ *       **Gravação tudo-ou-nada**: vínculo, cliente, endereço, pedido, itens e estoque são gravados numa
+ *       única transação. Se a resposta for um erro (400/500) ou não chegar, nada ficou gravado — é seguro
+ *       reenviar o mesmo pedido.
  *
  *       **Validação antes de gravar**: nada é gravado se houver qualquer problema. Todos os problemas vêm
  *       de uma vez, com o caminho do campo e como corrigir:
  *       - obrigatórios: `order.id`, `order.userId`, `order.date`, `order.customerName`, `order.fiscalDocument`,
- *         `order.salesmanId` e ao menos um item com `productId`, `quantity` e `unitPrice`;
+ *         `order.salesmanId`, `order.paymentTypeId` e ao menos um item com `productId`, `quantity` e `unitPrice`;
  *       - CPF/CNPJ válido; vendedor cadastrado e ativo (sem demissão; 0 não é aceito);
- *         `institutionId` e `paymentTypeId`, se enviados, precisam existir;
+ *         forma de pagamento existente; `institutionId`, se enviado, precisa existir;
  *       - tamanho máximo dos textos (ver `maxLength` em OrderSaleInput) e sem emojis/símbolos fora do WIN1252;
  *       - CEP com 8 dígitos (com ou sem máscara), UF válida, datas AAAA-MM-DD ou DD/MM/AAAA, hora HH:MM[:SS];
  *       - campos numéricos numéricos; `quantity` maior que zero.
@@ -268,34 +273,48 @@ router.get('/:id/items', orderSaleCtrl.listOrderItems);
  *         description: |
  *           Pedido não gravado. Em erros de validação, `fields` lista cada campo com problema
  *           (caminho no JSON, motivo/como corrigir e valor recebido) e `details` traz as mesmas
- *           mensagens prontas para exibir. Reenvio de pedido já processado traz só `error`.
+ *           mensagens prontas para exibir.
  *         content:
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/ValidationError'
- *             examples:
- *               validacao:
- *                 summary: Campos inválidos (todos listados de uma vez)
- *                 value:
- *                   error: "Pedido não gravado: corrija os campos indicados e envie novamente."
- *                   details:
- *                     - "order.complement: Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
- *                     - "order.salesmanId: Vendedor demitido em 28/09/2026 não pode receber pedidos. Use um vendedor ativo (GET /salesmen?active=true)."
- *                     - "items[0].quantity: Quantidade deve ser maior que zero."
- *                   fields:
- *                     - field: "order.complement"
- *                       message: "Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
- *                       received: "APARTAMENTO 1203 BLOCO B TORRE 2"
- *                     - field: "order.salesmanId"
- *                       message: "Vendedor demitido em 28/09/2026 não pode receber pedidos. Use um vendedor ativo (GET /salesmen?active=true)."
- *                       received: 496
- *                     - field: "items[0].quantity"
- *                       message: "Quantidade deve ser maior que zero."
- *                       received: 0
- *               jaProcessado:
- *                 summary: Reenvio de pedido faturado, na lixeira ou cancelado
- *                 value:
- *                   error: 'Pedido já processado. Excluído. Código externo: "PED-2026-0001", Pedido interno: 375085'
+ *             example:
+ *               error: "Pedido não gravado: corrija os campos indicados e envie novamente."
+ *               details:
+ *                 - "order.complement: Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
+ *                 - "order.salesmanId: Vendedor demitido em 28/09/2026 não pode receber pedidos. Use um vendedor ativo (GET /salesmen?active=true)."
+ *                 - "items[0].quantity: Quantidade deve ser maior que zero."
+ *               fields:
+ *                 - field: "order.complement"
+ *                   message: "Complemento tem 32 caracteres; o máximo aceito é 25. Abrevie o texto."
+ *                   received: "APARTAMENTO 1203 BLOCO B TORRE 2"
+ *                 - field: "order.salesmanId"
+ *                   message: "Vendedor demitido em 28/09/2026 não pode receber pedidos. Use um vendedor ativo (GET /salesmen?active=true)."
+ *                   received: 496
+ *                 - field: "items[0].quantity"
+ *                   message: "Quantidade deve ser maior que zero."
+ *                   received: 0
+ *       409:
+ *         description: |
+ *           Código externo (`order.id`) já recebido pela API. Nada foi gravado nem alterado; `order` traz o
+ *           pedido existente (número interno, situação e `externalId`). Atualize a referência no seu sistema
+ *           e trate como "já enviado" — não é um erro a ser reenviado.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error: { type: string }
+ *                 order:
+ *                   $ref: '#/components/schemas/OrderSale'
+ *             example:
+ *               error: 'Pedido já recebido: o código externo "PED-2026-0001" é o pedido interno 375085 (aberto). Nada foi alterado.'
+ *               order:
+ *                 id: 375085
+ *                 externalId: "PED-2026-0001"
+ *                 externalSource: "API"
+ *                 invoiced: "N"
+ *                 total: 725
  *       401:
  *         $ref: '#/components/responses/OrderSaleUnauthorized'
  *       500:
@@ -337,7 +356,7 @@ router.post('/', orderSaleCtrl.createOrder);
  *         nos GETs voltam como data/hora ISO em UTC (ex.: date "2026-10-14T03:00:00.000Z",
  *         hour "1970-01-01T11:30:00.000Z").
  *       properties:
- *         id:                  { type: integer, example: 375085, description: "Número interno do pedido no Gestão (PED_CODIGO). Muda a cada reenvio de um pedido aberto." }
+ *         id:                  { type: integer, example: 375085, description: "Número interno do pedido no Gestão (PED_CODIGO)." }
  *         externalId:          { type: string, nullable: true, example: "PED-2026-0001", description: "Código do pedido no sistema de origem (TB_PEDIDO_FROM_EXTERIOR.ID_EXTERIOR) — o order.id enviado no POST. Nulo para pedidos lançados direto no Gestão." }
  *         externalSource:      { type: string, nullable: true, example: "API", description: "Origem do vínculo (KIND): API = enviado por esta API; MAGAZORD = integração Magazord do ERP." }
  *         number:              { type: integer, example: 1050, nullable: true }
@@ -402,12 +421,12 @@ router.post('/', orderSaleCtrl.createOrder);
  *       properties:
  *         order:
  *           type: object
- *           required: [id, userId, date, customerName, fiscalDocument, salesmanId]
+ *           required: [id, userId, date, customerName, fiscalDocument, salesmanId, paymentTypeId]
  *           description: |
  *             Campos preenchidos internamente pela API (NÃO enviar):
  *             type, invoiced, presenceIndicator, terminal, approved, deliveryAddressId
  *           properties:
- *             id:                 { type: string, maxLength: 50, example: "PED-2026-0001", description: "Obrigatório. Código do pedido no SEU sistema. Fica vinculado ao número interno (TB_PEDIDO_FROM_EXTERIOR) e volta como externalId. Reenviar o mesmo código regrava o pedido se ele ainda estiver aberto." }
+ *             id:                 { type: string, maxLength: 50, example: "PED-2026-0001", description: "Obrigatório. Código do pedido no SEU sistema. Fica vinculado ao número interno (TB_PEDIDO_FROM_EXTERIOR) e volta como externalId. Cada código é gravado uma única vez: reenviar um código já recebido retorna 409 com o pedido existente, sem alterar nada." }
  *             userId:             { type: integer, description: "Código do usuário (retornado no login)", example: 3 }
  *             date:               { type: string, example: "2026-10-14", description: "Data do pedido. Formato AAAA-MM-DD ou DD/MM/AAAA" }
  *             hour:               { type: string, example: "08:30", description: "Formato HH:MM ou HH:MM:SS", nullable: true }
@@ -423,7 +442,7 @@ router.post('/', orderSaleCtrl.createOrder);
  *             cityName:           { type: string, maxLength: 60, example: "Curitiba" }
  *             stateAbbreviation:  { type: string, minLength: 2, maxLength: 2, example: "PR", description: "Sigla da UF (EX para exterior)" }
  *             salesmanId:         { type: integer, minimum: 1, example: 7, description: "Obrigatório. Código do vendedor (retornado no login); precisa ser vendedor ativo, sem demissão (GET /salesmen?active=true). 0 não é aceito." }
- *             paymentTypeId:      { type: integer, example: 1, nullable: true, description: "Se enviado, precisa existir (GET /payment-types)" }
+ *             paymentTypeId:      { type: integer, example: 1, description: "Obrigatório. Forma de pagamento; precisa existir (GET /payment-types)" }
  *             quantityProducts:   { type: number, example: 2 }
  *             totalProducts:      { type: number, example: 700 }
  *             freightValue:       { type: number, example: 25 }

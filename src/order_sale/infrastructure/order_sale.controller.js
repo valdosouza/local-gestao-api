@@ -69,6 +69,11 @@ async function createOrder(req, res, next) {
     res.locals.logContext += ` pedido=${result.order.id} itens=${result.items.length}`;
     res.status(201).json(result);
   } catch (err) {
+    // Código externo já recebido: devolve o pedido existente para o app atualizar a referência
+    if (err.status === 409) {
+      res.locals.logContext += ` pedido=${err.order?.id ?? '-'}`;
+      return res.status(409).json({ error: err.message, order: err.order });
+    }
     next(err);
   }
 }

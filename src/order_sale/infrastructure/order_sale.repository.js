@@ -1,6 +1,6 @@
 'use strict';
 
-const { query, withTransaction, queryInTransaction } = require('../../config/database');
+const { query, queryInTransaction, runQuery, inTransaction } = require('../../config/database');
 const OrderSale = require('../domain/order_sale.entity');
 
 const SELECT_COLS = `
@@ -22,11 +22,11 @@ class OrderSaleRepository {
    * para o mesmo pedido, prevalece o da API.
    * @returns {Promise<OrderSale[]>}
    */
-  async #withExternalLinks(rows) {
+  async #withExternalLinks(rows, trx = null) {
     if (!rows.length) return [];
 
     const ids = rows.map((r) => Number(r.PED_CODIGO));
-    const links = await query(
+    const links = await runQuery(trx,
       `SELECT TB_PEDIDO_ID, ID_EXTERIOR, KIND
        FROM TB_PEDIDO_FROM_EXTERIOR
        WHERE TB_PEDIDO_ID IN (${ids.map(() => '?').join(', ')})`,
@@ -101,28 +101,35 @@ class OrderSaleRepository {
    * Busca pedido pelo ID (PED_CODIGO).
    * @returns {Promise<OrderSale|null>}
    */
-  async findById(id) {
-    const rows = await query(
+  async findById(id, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT ${SELECT_COLS} FROM TB_PEDIDO p WHERE p.PED_CODIGO = ?`,
       [Number(id)]
     );
     if (!rows.length) return null;
-    const [order] = await this.#withExternalLinks(rows);
+    const [order] = await this.#withExternalLinks(rows, trx);
     return order;
   }
 
   /**
-   * Insere um novo pedido de venda.
-   * Usa GEN_ID fora da transação (padrão do projeto) e insere dentro de trx.
+   * Próximo PED_CODIGO pelo gerador GN_PEDIDO (o mesmo do ERP; nunca MAX + 1).
+   * Geradores não voltam no rollback: um pedido não gravado deixa um número sem uso.
+   */
+  async nextId(trx = null) {
+    const genRows = await runQuery(trx, 'SELECT GEN_ID(GN_PEDIDO, 1) AS NEW_ID FROM RDB$DATABASE');
+    return genRows[0].NEW_ID;
+  }
+
+  /**
+   * Insere um novo pedido de venda. Usa data.id se já reservado com nextId().
+   * Com trx, grava dentro dela; sem trx, numa transação própria.
    * @returns {Promise<OrderSale>}
    */
-  async create(data) {
-    // Sem fallback para MAX + 1: o ERP usa GN_PEDIDO e o código colidiria com o próximo dele
-    const genRows = await query('SELECT GEN_ID(GN_PEDIDO, 1) AS NEW_ID FROM RDB$DATABASE');
-    const newId = genRows[0].NEW_ID;
+  async create(data, trx = null) {
+    const newId = data.id ?? await this.nextId(trx);
 
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx, `
+    await inTransaction(trx, async (t) => {
+      await queryInTransaction(t, `
         INSERT INTO TB_PEDIDO (
           PED_CODIGO, PED_TIPO, PED_CODUSU, PED_DATA, PED_HORA,
           PED_CODEMP, PED_CODVDO, PED_CODFPG, PED_PRAZO, PED_CODEND,
@@ -294,8 +301,8 @@ class OrderSaleRepository {
   /**
    * Busca vínculo externo por código externo e kind.
    */
-  async findFromExterior(externalId, kind) {
-    const rows = await query(
+  async findFromExterior(externalId, kind, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT ID_EXTERIOR, KIND, TB_PEDIDO_ID
        FROM TB_PEDIDO_FROM_EXTERIOR
        WHERE ID_EXTERIOR = ? AND KIND = ?`,
@@ -314,21 +321,19 @@ class OrderSaleRepository {
    * Insere vínculo externo em TB_PEDIDO_FROM_EXTERIOR.
    * Referência Delphi: GeraVinculoFromExterior (linha 364).
    */
-  async insertFromExterior(externalId, kind, orderId) {
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx,
-        `INSERT INTO TB_PEDIDO_FROM_EXTERIOR (ID_EXTERIOR, KIND, TB_PEDIDO_ID)
-         VALUES (?, ?, ?)`,
-        [String(externalId), kind, Number(orderId)]
-      );
-    });
+  async insertFromExterior(externalId, kind, orderId, trx = null) {
+    await runQuery(trx,
+      `INSERT INTO TB_PEDIDO_FROM_EXTERIOR (ID_EXTERIOR, KIND, TB_PEDIDO_ID)
+       VALUES (?, ?, ?)`,
+      [String(externalId), kind, Number(orderId)]
+    );
   }
 
   /**
    * Remove vínculo externo.
    */
-  async deleteFromExterior(externalId, kind) {
-    await query(
+  async deleteFromExterior(externalId, kind, trx = null) {
+    await runQuery(trx,
       `DELETE FROM TB_PEDIDO_FROM_EXTERIOR WHERE ID_EXTERIOR = ? AND KIND = ?`,
       [String(externalId), kind]
     );
@@ -341,9 +346,9 @@ class OrderSaleRepository {
   /**
    * Busca empresa pelo CPF/CNPJ (remove caracteres especiais).
    */
-  async findEmpresaByDocument(fiscalDocument) {
+  async findEmpresaByDocument(fiscalDocument, trx = null) {
     const doc = fiscalDocument.replace(/[.\-/]/g, '');
-    const rows = await query(
+    const rows = await runQuery(trx,
       `SELECT EMP_CODIGO, EMP_NOME, EMP_CNPJ, EMP_PESSOA
        FROM TB_EMPRESA
        WHERE EMP_CNPJ = ?`,
@@ -361,8 +366,8 @@ class OrderSaleRepository {
   /**
    * Verifica se já existe registro em TB_CLIENTE para o EMP_CODIGO.
    */
-  async clienteExists(empCodigo) {
-    const rows = await query(
+  async clienteExists(empCodigo, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT CLI_CODEMP FROM TB_CLIENTE WHERE CLI_CODEMP = ?`,
       [Number(empCodigo)]
     );
@@ -373,14 +378,14 @@ class OrderSaleRepository {
    * Cria empresa (TB_EMPRESA).
    * Referência Delphi: CreateEmpresaSetes (linha 172).
    */
-  async createEmpresa(data) {
-    const genRows = await query('SELECT GEN_ID(GN_EMPRESA, 1) AS NEW_ID FROM RDB$DATABASE');
+  async createEmpresa(data, trx = null) {
+    const genRows = await runQuery(trx, 'SELECT GEN_ID(GN_EMPRESA, 1) AS NEW_ID FROM RDB$DATABASE');
     const newId = genRows[0].NEW_ID;
     const doc = (data.fiscalDocument || '').replace(/[.\-/]/g, '');
     const tipoPessoa = doc.length === 14 ? 'J' : 'F';
 
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx, `
+    await inTransaction(trx, async (t) => {
+      await queryInTransaction(t, `
         INSERT INTO TB_EMPRESA (
           EMP_CODIGO, EMP_TIPO, EMP_NOME, EMP_FANTASIA, EMP_INSC_EST,
           EMP_STCRED, EMP_OBSERV, EMP_DT_CADASTRO, EMP_PESSOA, EMP_CNPJ,
@@ -425,20 +430,18 @@ class OrderSaleRepository {
    * Cria registro em TB_CLIENTE.
    * Referência Delphi: CreateClienteSetes (linha 158).
    */
-  async createCliente(empCodigo) {
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx, `
-        INSERT INTO TB_CLIENTE (CLI_CODEMP, CLI_ATIVO, CLI_OBS_NF, CLI_JUST_XML_NFE, CLI_IND_IE_DEST)
-        VALUES (?, 'S', '', 'N', '9')
-      `, [Number(empCodigo)]);
-    });
+  async createCliente(empCodigo, trx = null) {
+    await runQuery(trx, `
+      INSERT INTO TB_CLIENTE (CLI_CODEMP, CLI_ATIVO, CLI_OBS_NF, CLI_JUST_XML_NFE, CLI_IND_IE_DEST)
+      VALUES (?, 'S', '', 'N', '9')
+    `, [Number(empCodigo)]);
   }
 
   /**
    * Busca endereço principal de uma empresa.
    */
-  async findEnderecoPrincipal(empCodigo) {
-    const rows = await query(
+  async findEnderecoPrincipal(empCodigo, trx = null) {
+    const rows = await runQuery(trx,
       `SELECT END_CODIGO, END_CODEMP FROM TB_ENDERECO
        WHERE END_CODEMP = ? AND END_PRINCIPAL = 'S'`,
       [Number(empCodigo)]
@@ -451,8 +454,8 @@ class OrderSaleRepository {
    * Cria endereço (TB_ENDERECO).
    * Referência Delphi: CreateEnderecoSetes (linha 209).
    */
-  async createEndereco(data) {
-    const genRows = await query('SELECT GEN_ID(GN_ENDERECO, 1) AS NEW_ID FROM RDB$DATABASE');
+  async createEndereco(data, trx = null) {
+    const genRows = await runQuery(trx, 'SELECT GEN_ID(GN_ENDERECO, 1) AS NEW_ID FROM RDB$DATABASE');
     const newId = genRows[0].NEW_ID;
     const doc = (data.fiscalDocument || '').replace(/[.\-/]/g, '');
     // END_CEP é VARCHAR(8): grava só os dígitos ("81770-090" -> "81770090")
@@ -462,7 +465,7 @@ class OrderSaleRepository {
 
     let codigoEstado = null;
     if (siglaUf) {
-      const ufRows = await query(
+      const ufRows = await runQuery(trx,
         `SELECT UFE_CODIGO FROM TB_UF WHERE UFE_SIGLA = ?`,
         [siglaUf]
       );
@@ -471,7 +474,7 @@ class OrderSaleRepository {
 
     let codigoCidade = null;
     if (data.cityName && siglaUf) {
-      const cidRows = await query(
+      const cidRows = await runQuery(trx,
         `SELECT FIRST 1 CDD_CODIGO FROM TB_CIDADE
          WHERE UPPER(CDD_DESCRICAO) = ? AND CDD_UF = ?`,
         [data.cityName.toUpperCase(), siglaUf]
@@ -479,8 +482,8 @@ class OrderSaleRepository {
       codigoCidade = cidRows.length ? cidRows[0].CDD_CODIGO : 4004;
     }
 
-    await withTransaction(async (trx) => {
-      await queryInTransaction(trx, `
+    await inTransaction(trx, async (t) => {
+      await queryInTransaction(t, `
         INSERT INTO TB_ENDERECO (
           END_CODIGO, END_CODEMP, END_CNPJ, END_TIPO,
           END_ENDER, END_NUMERO, END_COMPLEM, END_BAIRRO, END_CEP,
