@@ -35,6 +35,14 @@ const router = Router();
  *         schema: { type: integer, default: 0 }
  *         description: Número de registros a pular
  *       - in: query
+ *         name: number
+ *         schema: { type: string }
+ *         description: Parte do número do orçamento ou código interno exato
+ *       - in: query
+ *         name: customerName
+ *         schema: { type: string }
+ *         description: Parte do nome do cliente gravado no orçamento
+ *       - in: query
  *         name: status
  *         schema: { type: string }
  *         description: Filtro por status (ex. A, I, F)

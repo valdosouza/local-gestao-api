@@ -22,6 +22,18 @@ class BudgetRepository {
 
     conditions.push('c.CTC_CODPED = 0');
 
+    // Os mesmos filtros são aplicados à contagem e à página, com parâmetros.
+    const number = typeof filters.number === 'string' ? filters.number.trim() : '';
+    const customerName = typeof filters.customerName === 'string' ? filters.customerName.trim() : '';
+    if (number) {
+      conditions.push("(COALESCE(c.CTC_NUMERO, '') CONTAINING ? OR CAST(c.CTC_CODIGO AS VARCHAR(20)) = ?)");
+      params.push(number, number);
+    }
+    if (customerName) {
+      conditions.push("COALESCE(c.CTC_FANTASIA, '') CONTAINING ?");
+      params.push(customerName);
+    }
+
     if (filters.status) {
       conditions.push('c.CTC_STATUS = ?');
       params.push(filters.status);

@@ -145,11 +145,11 @@ async function query(sql, params = []) {
  *   Dentro do callback, use: await queryInTransaction(transaction, sql, params)
  * @returns {Promise<*>} O valor retornado pelo callback, após o commit
  */
-async function withTransaction(callback) {
+async function withTransaction(callback, options = Firebird.ISOLATION_READ_COMMITTED) {
   const db = await getConnection();
 
   return new Promise((resolve, reject) => {
-    db.transaction(Firebird.ISOLATION_READ_COMMITTED, async (err, transaction) => {
+    db.transaction(options, async (err, transaction) => {
       if (err) {
         db.detach();
         return reject(err);

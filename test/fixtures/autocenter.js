@@ -1,0 +1,3 @@
+const {accessories}=require('../../src/autocenter/maps');
+const fixture=()=>({vehicleDirty:true,checklistDirty:true,header:{customerId:1,customerName:'Cliente',paymentTypeId:1,date:'2026-11-02',freight:10,additional:2},items:[{type:'P',productId:2,description:'Peça',quantity:2.5,unitPrice:10.123456,discountValue:1},{type:'S',productId:3,description:'Serviço',quantity:1,unitPrice:30,discountValue:2}],vehicle:{plate:'ABC1D23',brandId:1,modelId:2,kindId:1,colorId:3,engine:0},checklist:{regions:'N'.repeat(21)+'A',frontTyre:'E',backTyre:'B',spareTyre:'R',fuel:'3',valves:'16',...Object.fromEntries(accessories.map(k=>[k,'N']))}});
+module.exports={fixture};
