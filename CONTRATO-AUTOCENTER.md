@@ -43,6 +43,12 @@ vehicleDirty/checklistDirty vêm como false na consulta. Quando não alterados, 
 
 ## Validação e limites
 
-Testes de regras, 88 combinações de posição/estado, totais, rollback, conflito, idempotência, recorte e permissão usam banco/HTTP simulados. Leitura real do documento e dos nove cadastros foi validada, sem criar orçamentos. A pesquisa de cores retornou vazia na base examinada.
+Testes de regras, 88 combinações de posição/estado, totais, rollback, conflito, idempotência, recorte e permissão usam banco/HTTP simulados. Leitura real do documento e dos nove cadastros foi validada, sem criar orçamentos. Em 2026-11-09 a consulta, o nome exibido e a validação da cor foram corrigidos para TB_COLOR(ID, DESCRIPTION), conforme o Delphi. A base tem 16 cores. A leitura antiga de TB_COR_VEICULO era incorreta.
 
 Não se declara homologação de gravação comercial real nem equivalência de todas as regras de comissões, campanhas, serviços associados e técnicos. A numeração comercial nova permanece para o fluxo legado; não foi substituída por um generator incompatível com o MAX do desktop. Não há aprovação/conversão/faturamento neste módulo. Roteiro de homologação em GestaoApps/apps/budget_autocenter/HOMOLOGACAO.md.
+
+## Cadastros auxiliares do veículo — 2026-11-09
+
+GET /autocenter/catalog/:kind retorna também canCreate, calculado pelo JWT. POST na mesma rota aceita brands, models, kinds e colors, com institutionId na query, label no corpo e brandId obrigatório para models. Retorna id, label e created, status 201 para inclusão ou 200 ao reutilizar nome existente. Exige Visualizar em Fr_Cotacao e Inserir em Fr_MarcaModelo ou Fr_Tp_Veiculo. O nível enviado no corpo é ignorado.
+
+Cadastro global, independente da transação do orçamento. Marca/modelo usam generators do Delphi GN_MARCAMODELO/GN_MODELO. Tipo usa próximo TPV_CODIGO em transação SERIALIZABLE/NO WAIT. Descrição obrigatória de até 100 caracteres, normalizada com TRIM/UPPER. Nomes existentes são reutilizados, com recorte por marca para modelo. Em conflito 409, atualizar a pesquisa. Em resposta incerta, pesquisar/repetir o mesmo nome. Os campos opcionais RENAVAM ficam sem valor. Cores permitem inclusão em TB_COLOR(ID, DESCRIPTION), exigindo Inserir em Fr_Veiculo. Essa permissão foi adotada porque a base não possui permissão exclusiva para cores. TB_COLOR não possui generator; o próximo ID é calculado sob a mesma transação SERIALIZABLE/NO WAIT. A inclusão devolve o registro para seleção automática no app.

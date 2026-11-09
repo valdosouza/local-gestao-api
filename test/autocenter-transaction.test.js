@@ -19,6 +19,8 @@ test.beforeEach(()=>{statements=[];commit=false;rollback=false;failTable=null;op
 test('cabeçalho, itens, veículo, vínculo, checklist e chave de envio compartilham transação',async()=>{
  const d=input();d.document.items[0].stockId=1;d.document.items[0].priceListId=1;
  await repo.save(d);assert.equal(commit,true);assert.equal(rollback,false);
+ assert.ok(statements.some(s=>s.sql==='SELECT ID FROM TB_COLOR WHERE ID = ?'&&s.params[0]===3));
+ assert.ok(!statements.some(s=>s.sql.includes('TB_COR_VEICULO')));
  for(const table of ['TB_APP_BUDGET_OP','TB_COTACAO','TB_ITENS_CTC','TB_VEICULO'])assert.ok(statements.some(s=>s.sql.startsWith('INSERT INTO '+table)));
  for(const table of ['TB_VEHICLE_SO','TB_VEHICLE_CHECKLIST'])assert.ok(statements.some(s=>s.sql.startsWith('UPDATE OR INSERT INTO '+table)));
  const discount=statements.find(s=>s.sql.startsWith('UPDATE TB_COTACAO SET "CTC_QT_PRODUTO"'));

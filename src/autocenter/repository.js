@@ -32,7 +32,7 @@ async function read(q,budgetId,institutionId,lock=false){
  const vehicles=links.length?await blobs(await q(`SELECT * FROM TB_VEICULO WHERE VEI_PLACA = ?${lock?' WITH LOCK':''}`,[links[0].TB_VEHICLE_ID])):[];
  const version=hash({head,items,links,checks,vehicles});
  const vehicleData=vehicles.length?maps.pick(vehicles[0],maps.vehicle):{};
- if(vehicles.length)for(const [key,table,code,label] of [['brandId','TB_MARCA_VEICULO','MRC_CODIGO','MRC_DESCRICAO'],['modelId','TB_MODELO','MOD_CODIGO','MOD_DESCRICAO'],['kindId','TB_TP_VEICULO','TPV_CODIGO','TPV_DESCRICAO'],['colorId','TB_COR_VEICULO','COR_CODIGO','COR_DESCRICAO']]){
+ if(vehicles.length)for(const [key,table,code,label] of [['brandId','TB_MARCA_VEICULO','MRC_CODIGO','MRC_DESCRICAO'],['modelId','TB_MODELO','MOD_CODIGO','MOD_DESCRICAO'],['kindId','TB_TP_VEICULO','TPV_CODIGO','TPV_DESCRICAO'],['colorId','TB_COLOR','ID','DESCRIPTION']]){
   const ref=vehicleData[key]>0?(await q('SELECT '+label+' AS LABEL FROM '+table+' WHERE '+code+' = ?',[vehicleData[key]]))[0]:null;
   vehicleData[key+'Label']=ref?.LABEL?.trim()||(vehicleData[key]>0?'Código '+vehicleData[key]:'Não informado');
  }
@@ -76,7 +76,7 @@ async function ensureReferences(q,doc,institution,old){
   }
  }
  if(doc.vehicle && doc.vehicleDirty!==false){const v=doc.vehicle;
-  for(const [table,column,key] of [['TB_MARCA_VEICULO','MRC_CODIGO','brandId'],['TB_TP_VEICULO','TPV_CODIGO','kindId'],['TB_COR_VEICULO','COR_CODIGO','colorId']]){
+  for(const [table,column,key] of [['TB_MARCA_VEICULO','MRC_CODIGO','brandId'],['TB_TP_VEICULO','TPV_CODIGO','kindId'],['TB_COLOR','ID','colorId']]){
    if(!(await q(`SELECT ${column} FROM ${table} WHERE ${column} = ?`,[v[key]])).length)fail('Cadastro auxiliar de veículo inválido.');
   }
   if(!(await q('SELECT MOD_CODIGO FROM TB_MODELO WHERE MOD_CODIGO = ? AND MOD_CODMRC = ?',[v.modelId,v.brandId])).length)fail('Modelo não pertence à marca selecionada.');

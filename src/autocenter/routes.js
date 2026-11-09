@@ -5,6 +5,7 @@ const permission=require('../permission/application/permission.service');
 const repo=require('./repository');
 const {hash,fail,id}=require('./document');
 const maps=require('./maps');
+const vehicleCatalog=require('./vehicle-catalog');
 const router=Router();
 const wrap=f=>async(req,res,next)=>{try{await f(req,res);}catch(e){if(!e.status && /lock conflict|deadlock|update conflicts/i.test(e.message))e=Object.assign(new Error('Outro usuário está alterando os dados. Atualize o orçamento antes de tentar novamente.'),{status:409});if(!e.status && /foreign key/i.test(e.message))e=Object.assign(new Error('O item possui vínculos no Gestão. Confira técnicos ou outros detalhes antes de excluí-lo.'),{status:409});next(e);}};
 async function permit(user,kind){const result=await permission.checkPermission({userId:Number(user.sub),userLevel:user.level,menu:'Fr_Cotacao',kind,situation:'S'});if(!result.result)fail('Usuário sem permissão para esta operação.',403);}
@@ -23,11 +24,16 @@ async function save(req,res){
  res.status(budgetId?200:201).json(result);
 }
 router.post('/budgets',wrap(save));router.put('/budgets/:id',wrap(save));
+router.post('/catalog/:kind',wrap(async(req,res)=>{
+ await permit(req.user,'Visualizar');institution(req);
+ const result=await vehicleCatalog.create(req.user,req.params.kind,req.body);
+ res.status(result.created?201:200).json(result);
+}));
 router.get('/catalog/:kind',wrap(async(req,res)=>{
  await permit(req.user,'Visualizar');const inst=institution(req),kind=req.params.kind;
  const offset=Math.max(0,Math.floor(Number(req.query.offset)||0)),limit=20,search=String(req.query.search||'').trim().slice(0,100);
  let table,code,label,where='1=1',params=[];
- const simple={brands:['TB_MARCA_VEICULO','MRC_CODIGO','MRC_DESCRICAO'],models:['TB_MODELO','MOD_CODIGO','MOD_DESCRICAO'],kinds:['TB_TP_VEICULO','TPV_CODIGO','TPV_DESCRICAO'],colors:['TB_COR_VEICULO','COR_CODIGO','COR_DESCRICAO'],stocks:['TB_ESTOQUES','ETS_CODIGO','ETS_DESCRICAO']};
+ const simple={brands:['TB_MARCA_VEICULO','MRC_CODIGO','MRC_DESCRICAO'],models:['TB_MODELO','MOD_CODIGO','MOD_DESCRICAO'],kinds:['TB_TP_VEICULO','TPV_CODIGO','TPV_DESCRICAO'],colors:['TB_COLOR','ID','DESCRIPTION'],stocks:['TB_ESTOQUES','ETS_CODIGO','ETS_DESCRICAO']};
  if(simple[kind]){
   [table,code,label]=simple[kind];
   if(kind==='models'){where+=' AND MOD_CODMRC = ?';params.push(id(Number(req.query.brandId),'marca'));}
@@ -46,6 +52,6 @@ router.get('/catalog/:kind',wrap(async(req,res)=>{
  if(search){where+=` AND (${label} CONTAINING ? OR CAST(${code} AS VARCHAR(20)) = ?)`;params.push(search,search);}
  const count=await db.queryReadOnly(`SELECT COUNT(*) AS TOTAL FROM ${table} WHERE ${where}`,params);
  const rows=await db.queryReadOnly(`SELECT FIRST ? SKIP ? ${code} AS ID,${label} AS LABEL FROM ${table} WHERE ${where} ORDER BY ${label}`,[limit,offset,...params]);
- res.json({data:rows.map(r=>({id:r.ID,label:r.LABEL.trim()})),meta:{total:Number(count[0].TOTAL),offset,limit}});
+ res.json({data:rows.map(r=>({id:r.ID,label:r.LABEL.trim()})),meta:{total:Number(count[0].TOTAL),offset,limit},canCreate:await vehicleCatalog.canCreate(req.user,kind)});
 }));
 module.exports=router;
